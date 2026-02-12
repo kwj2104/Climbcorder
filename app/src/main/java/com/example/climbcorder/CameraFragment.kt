@@ -15,6 +15,8 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -22,7 +24,9 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
+import android.view.animation.AlphaAnimation
+import android.view.animation.Animation
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -46,14 +50,31 @@ class CameraFragment : Fragment() {
     private lateinit var cameraExecutor: ExecutorService
 
     private lateinit var viewFinder: PreviewView
-    private lateinit var recordButton: Button
-    private lateinit var statusText: TextView
+    private lateinit var recordButton: FrameLayout
+    private lateinit var recordInner: View
+    private lateinit var timerText: TextView
     private lateinit var bluetoothIndicator: LinearLayout
+    private lateinit var bluetoothText: TextView
+    private var pulseAnimation: AlphaAnimation? = null
 
     private var mediaSession: MediaSessionCompat? = null
     private var audioFocusRequest: AudioFocusRequest? = null
     private var bluetoothConnected = false
     private var recordingViaHeadset = false
+    private var recordingCooldownUntil = 0L
+
+    private val timerHandler = Handler(Looper.getMainLooper())
+    private var recordingStartTimeMs = 0L
+    private val timerRunnable = object : Runnable {
+        override fun run() {
+            val elapsedMs = System.currentTimeMillis() - recordingStartTimeMs
+            val totalSeconds = (elapsedMs / 1000).toInt()
+            val minutes = totalSeconds / 60
+            val seconds = totalSeconds % 60
+            timerText.text = String.format("%02d:%02d", minutes, seconds)
+            timerHandler.postDelayed(this, 1000)
+        }
+    }
 
     private val bluetoothReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -90,8 +111,10 @@ class CameraFragment : Fragment() {
 
         viewFinder = view.findViewById(R.id.viewFinder)
         recordButton = view.findViewById(R.id.recordButton)
-        statusText = view.findViewById(R.id.statusText)
+        recordInner = view.findViewById(R.id.recordInner)
+        timerText = view.findViewById(R.id.timerText)
         bluetoothIndicator = view.findViewById(R.id.bluetoothIndicator)
+        bluetoothText = view.findViewById(R.id.bluetoothText)
 
         // Check permissions
         if (allPermissionsGranted()) {
@@ -106,6 +129,7 @@ class CameraFragment : Fragment() {
 
         // Set up record button
         recordButton.setOnClickListener {
+            if (recording == null && System.currentTimeMillis() < recordingCooldownUntil) return@setOnClickListener
             recordingViaHeadset = false
             if (recording != null) {
                 stopRecording()
@@ -182,6 +206,7 @@ class CameraFragment : Fragment() {
     }
 
     private fun toggleRecordingViaHeadset() {
+        if (recording == null && System.currentTimeMillis() < recordingCooldownUntil) return
         recordingViaHeadset = true
         if (recording != null) {
             stopRecording()
@@ -263,6 +288,16 @@ class CameraFragment : Fragment() {
         }
     }
 
+    private fun playAnnouncement(resId: Int) {
+        try {
+            val mp = MediaPlayer.create(requireContext(), resId)
+            mp?.setOnCompletionListener { it.release() }
+            mp?.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to play announcement", e)
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         requestAudioFocus()
@@ -316,14 +351,53 @@ class CameraFragment : Fragment() {
                     videoCapture
                 )
 
-                statusText.text = "Ready to record"
-
             } catch (e: Exception) {
                 Log.e(TAG, "Camera binding failed", e)
-                statusText.text = "Camera error"
             }
 
         }, ContextCompat.getMainExecutor(requireContext()))
+    }
+
+    private fun startBluetoothPulse() {
+        bluetoothText.text = "Remote recording"
+        pulseAnimation = AlphaAnimation(1.0f, 0.3f).apply {
+            duration = 800
+            repeatMode = Animation.REVERSE
+            repeatCount = Animation.INFINITE
+        }
+        bluetoothIndicator.startAnimation(pulseAnimation)
+    }
+
+    private fun stopBluetoothPulse() {
+        bluetoothIndicator.clearAnimation()
+        pulseAnimation = null
+        bluetoothText.text = "Headset control active"
+    }
+
+    private fun setRecordingUI() {
+        val innerSizePx = (36 * resources.displayMetrics.density).toInt()
+        val params = recordInner.layoutParams as FrameLayout.LayoutParams
+        params.width = innerSizePx
+        params.height = innerSizePx
+        recordInner.layoutParams = params
+        recordInner.setBackgroundResource(R.drawable.bg_record_inner_recording)
+
+        timerText.visibility = View.VISIBLE
+        recordingStartTimeMs = System.currentTimeMillis()
+        timerText.text = "00:00"
+        timerHandler.post(timerRunnable)
+    }
+
+    private fun setIdleUI() {
+        val innerSizePx = (56 * resources.displayMetrics.density).toInt()
+        val params = recordInner.layoutParams as FrameLayout.LayoutParams
+        params.width = innerSizePx
+        params.height = innerSizePx
+        recordInner.layoutParams = params
+        recordInner.setBackgroundResource(R.drawable.bg_record_inner_idle)
+
+        timerHandler.removeCallbacks(timerRunnable)
+        timerText.visibility = View.GONE
     }
 
     private fun startRecording() {
@@ -363,14 +437,11 @@ class CameraFragment : Fragment() {
             .start(ContextCompat.getMainExecutor(requireContext())) { recordEvent ->
                 when (recordEvent) {
                     is VideoRecordEvent.Start -> {
-                        recordButton.apply {
-                            text = "Stop"
-                            isEnabled = true
-                        }
-                        statusText.text = if (startedViaHeadset) {
-                            "Recording via headset..."
-                        } else {
-                            "Recording..."
+                        recordButton.isEnabled = true
+                        setRecordingUI()
+                        playAnnouncement(R.raw.announce_recording)
+                        if (startedViaHeadset && bluetoothConnected) {
+                            startBluetoothPulse()
                         }
                     }
                     is VideoRecordEvent.Finalize -> {
@@ -378,16 +449,20 @@ class CameraFragment : Fragment() {
                             val msg = "Video saved: ${recordEvent.outputResults.outputUri}"
                             Toast.makeText(requireContext(), "Video saved!", Toast.LENGTH_SHORT).show()
                             Log.d(TAG, msg)
+                            playAnnouncement(R.raw.announce_recording_finished)
+                            Executors.newSingleThreadExecutor().execute {
+                                AppDatabase.getInstance(requireContext())
+                                    .recordingDao()
+                                    .insert(ClimbRecording(timestamp = System.currentTimeMillis()))
+                            }
                         } else {
                             recording?.close()
                             recording = null
                             Log.e(TAG, "Video capture error: ${recordEvent.error}")
                         }
-                        recordButton.apply {
-                            text = "Record"
-                            isEnabled = true
-                        }
-                        statusText.text = "Ready to record"
+                        recordButton.isEnabled = true
+                        setIdleUI()
+                        stopBluetoothPulse()
                         recordingViaHeadset = false
                     }
                 }
@@ -397,6 +472,7 @@ class CameraFragment : Fragment() {
     private fun stopRecording() {
         recording?.stop()
         recording = null
+        recordingCooldownUntil = System.currentTimeMillis() + 3000
     }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
@@ -425,6 +501,7 @@ class CameraFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        timerHandler.removeCallbacks(timerRunnable)
         mediaSession?.release()
         mediaSession = null
         abandonAudioFocus()

@@ -10,4 +10,5 @@
     <color name="light_grey">#FFF2F2F2</color>
     <color name="dark_grey">#494949</color>
     <color name="accent_blue">#FF4A90D9</color>
+    <color name="record_red">#FFE53935</color>
 </resources>
