@@ -85,4 +85,30 @@
 
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/bluetooth_indicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="32dp"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:contentDescription="Bluetooth connected"
+                android:src="@drawable/ic_bluetooth" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="Bluetooth headset connected"
+                android:textColor="@color/dark_grey"
+                android:textSize="14sp" />
+
+        </LinearLayout>
+
 </LinearLayout>

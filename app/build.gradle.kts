@@ -51,6 +51,9 @@ dependencies {
     implementation(libs.room.runtime)
     ksp(libs.room.compiler)
 
+    // AndroidX Media (for MediaSessionCompat + MediaButtonReceiver)
+    implementation("androidx.media:media:1.7.0")
+
     // CameraX
     val cameraxVersion = "1.3.1"
     implementation("androidx.camera:camera-core:$cameraxVersion")

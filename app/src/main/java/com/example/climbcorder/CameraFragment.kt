@@ -1,15 +1,29 @@
 package com.example.climbcorder
 
 import android.Manifest
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
 import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.os.Bundle
 import android.provider.MediaStore
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.camera.core.CameraSelector
@@ -34,6 +48,25 @@ class CameraFragment : Fragment() {
     private lateinit var viewFinder: PreviewView
     private lateinit var recordButton: Button
     private lateinit var statusText: TextView
+    private lateinit var bluetoothIndicator: LinearLayout
+
+    private var mediaSession: MediaSessionCompat? = null
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private var bluetoothConnected = false
+    private var recordingViaHeadset = false
+
+    private val bluetoothReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    updateBluetoothState(true)
+                }
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    updateBluetoothState(false)
+                }
+            }
+        }
+    }
 
     companion object {
         private const val TAG = "CameraFragment"
@@ -58,6 +91,7 @@ class CameraFragment : Fragment() {
         viewFinder = view.findViewById(R.id.viewFinder)
         recordButton = view.findViewById(R.id.recordButton)
         statusText = view.findViewById(R.id.statusText)
+        bluetoothIndicator = view.findViewById(R.id.bluetoothIndicator)
 
         // Check permissions
         if (allPermissionsGranted()) {
@@ -72,6 +106,7 @@ class CameraFragment : Fragment() {
 
         // Set up record button
         recordButton.setOnClickListener {
+            recordingViaHeadset = false
             if (recording != null) {
                 stopRecording()
             } else {
@@ -80,6 +115,171 @@ class CameraFragment : Fragment() {
         }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
+
+        setupMediaSession()
+        registerBluetoothReceiver()
+    }
+
+    private fun setupMediaSession() {
+        mediaSession = MediaSessionCompat(requireContext(), "ClimbcorderRecord").apply {
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onMediaButtonEvent(mediaButtonEvent: Intent): Boolean {
+                    Log.d(TAG, "onMediaButtonEvent: $mediaButtonEvent")
+                    val keyEvent = mediaButtonEvent.getParcelableExtra(
+                        Intent.EXTRA_KEY_EVENT,
+                        android.view.KeyEvent::class.java
+                    )
+                    Log.d(TAG, "KeyEvent: keyCode=${keyEvent?.keyCode} action=${keyEvent?.action}")
+                    if (keyEvent?.action == android.view.KeyEvent.ACTION_DOWN) {
+                        when (keyEvent.keyCode) {
+                            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                            android.view.KeyEvent.KEYCODE_HEADSETHOOK,
+                            android.view.KeyEvent.KEYCODE_MEDIA_PLAY,
+                            android.view.KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                                toggleRecordingViaHeadset()
+                                return true
+                            }
+                        }
+                    }
+                    return super.onMediaButtonEvent(mediaButtonEvent)
+                }
+
+                override fun onPlay() {
+                    Log.d(TAG, "onPlay")
+                    toggleRecordingViaHeadset()
+                }
+
+                override fun onPause() {
+                    Log.d(TAG, "onPause")
+                    toggleRecordingViaHeadset()
+                }
+
+                override fun onStop() {
+                    Log.d(TAG, "onStop")
+                    toggleRecordingViaHeadset()
+                }
+            })
+
+            // Set flags for media button and transport control handling
+            setFlags(
+                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
+                    MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
+
+            // Set playback state — STATE_PLAYING with declared actions so the
+            // system routes media button events to this session
+            val playbackState = PlaybackStateCompat.Builder()
+                .setActions(
+                    PlaybackStateCompat.ACTION_PLAY or
+                        PlaybackStateCompat.ACTION_PAUSE or
+                        PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                        PlaybackStateCompat.ACTION_STOP
+                )
+                .setState(PlaybackStateCompat.STATE_PLAYING, 0L, 1f)
+                .build()
+            setPlaybackState(playbackState)
+        }
+    }
+
+    private fun toggleRecordingViaHeadset() {
+        recordingViaHeadset = true
+        if (recording != null) {
+            stopRecording()
+        } else {
+            startRecording()
+        }
+    }
+
+    private fun requestAudioFocus() {
+        val audioManager = requireContext().getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val attrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(attrs)
+            .setOnAudioFocusChangeListener { focus ->
+                Log.d(TAG, "Audio focus changed: $focus")
+            }
+            .build()
+        audioFocusRequest = request
+        val result = audioManager.requestAudioFocus(request)
+        Log.d(TAG, "Audio focus request result: $result")
+    }
+
+    private fun abandonAudioFocus() {
+        val audioManager = requireContext().getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+        audioFocusRequest = null
+    }
+
+    private fun registerBluetoothReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+        }
+        requireContext().registerReceiver(bluetoothReceiver, filter)
+    }
+
+    private fun isBluetoothAudioConnected(): Boolean {
+        if (ContextCompat.checkSelfPermission(
+                requireContext(),
+                Manifest.permission.BLUETOOTH_CONNECT
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+        val bluetoothManager =
+            requireContext().getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        val adapter = bluetoothManager?.adapter ?: return false
+        return adapter.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED ||
+            adapter.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothProfile.STATE_CONNECTED
+    }
+
+    private fun updateBluetoothState(connected: Boolean) {
+        bluetoothConnected = connected
+        if (!isAdded) return
+
+        requireActivity().runOnUiThread {
+            if (connected) {
+                bluetoothIndicator.visibility = View.VISIBLE
+            } else {
+                bluetoothIndicator.visibility = View.GONE
+                recordingViaHeadset = false
+            }
+        }
+    }
+
+    private fun playSilence() {
+        // Play a brief silent clip so Android recognizes this app as the
+        // active audio player and routes media button events to our session
+        try {
+            val mp = MediaPlayer.create(requireContext(), R.raw.silence)
+            mp?.setOnCompletionListener { it.release() }
+            mp?.start()
+            Log.d(TAG, "Playing silent clip to claim media button session")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to play silence", e)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        requestAudioFocus()
+        mediaSession?.isActive = true
+        playSilence()
+        Log.d(TAG, "MediaSessionCompat active, audio focus requested")
+
+        val connected = isBluetoothAudioConnected()
+        Log.d(TAG, "Bluetooth audio connected: $connected")
+        bluetoothConnected = connected
+        bluetoothIndicator.visibility = if (connected) View.VISIBLE else View.GONE
+    }
+
+    override fun onPause() {
+        super.onPause()
+        mediaSession?.isActive = false
+        abandonAudioFocus()
     }
 
     private fun startCamera() {
@@ -146,6 +346,8 @@ class CameraFragment : Fragment() {
             .setContentValues(contentValues)
             .build()
 
+        val startedViaHeadset = recordingViaHeadset
+
         // Start recording
         recording = videoCapture.output
             .prepareRecording(requireContext(), mediaStoreOutputOptions)
@@ -165,7 +367,11 @@ class CameraFragment : Fragment() {
                             text = "Stop"
                             isEnabled = true
                         }
-                        statusText.text = "Recording..."
+                        statusText.text = if (startedViaHeadset) {
+                            "Recording via headset..."
+                        } else {
+                            "Recording..."
+                        }
                     }
                     is VideoRecordEvent.Finalize -> {
                         if (!recordEvent.hasError()) {
@@ -182,6 +388,7 @@ class CameraFragment : Fragment() {
                             isEnabled = true
                         }
                         statusText.text = "Ready to record"
+                        recordingViaHeadset = false
                     }
                 }
             }
@@ -213,6 +420,18 @@ class CameraFragment : Fragment() {
                     Toast.LENGTH_SHORT
                 ).show()
             }
+        }
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        mediaSession?.release()
+        mediaSession = null
+        abandonAudioFocus()
+        try {
+            requireContext().unregisterReceiver(bluetoothReceiver)
+        } catch (_: IllegalArgumentException) {
+            // Receiver was not registered
         }
     }
 

@@ -1,7 +1,18 @@
 package com.example.climbcorder
 
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
+import androidx.activity.result.contract.ActivityResultContracts
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -22,6 +33,17 @@ class HomeFragment : Fragment() {
     private val displayedMonth = Calendar.getInstance()
     private val currentMonth = Calendar.getInstance()
     private lateinit var db: AppDatabase
+
+    private var bluetoothIndicator: LinearLayout? = null
+    private var bluetoothReceiver: BroadcastReceiver? = null
+
+    private val bluetoothPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            view?.let { setupBluetoothIndicator(it) }
+        }
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -50,6 +72,81 @@ class HomeFragment : Fragment() {
         }
 
         populateCalendar(view)
+
+        setupBluetoothIndicator(view)
+    }
+
+    private fun hasBluetoothPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(
+                requireContext(), android.Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    private fun setupBluetoothIndicator(view: View) {
+        bluetoothIndicator = view.findViewById(R.id.bluetooth_indicator)
+
+        if (!hasBluetoothPermission()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                bluetoothPermissionLauncher.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
+            }
+            return
+        }
+
+        val bluetoothManager =
+            requireContext().getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        val adapter = bluetoothManager?.adapter ?: return
+
+        // Check if any A2DP device is currently connected
+        val connectedDevices = adapter.getProfileConnectionState(BluetoothProfile.A2DP)
+        if (connectedDevices == BluetoothProfile.STATE_CONNECTED) {
+            bluetoothIndicator?.visibility = View.VISIBLE
+        }
+
+        // Listen for connect/disconnect events
+        bluetoothReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (!hasBluetoothPermission()) return
+                val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                val majorClass = device?.bluetoothClass?.majorDeviceClass
+                // Accept audio/video devices (0x0400), or if class is unknown (null)
+                val isAudioDevice = majorClass == null || majorClass == 0x0400
+
+                when (intent.action) {
+                    BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                        if (isAudioDevice) {
+                            bluetoothIndicator?.visibility = View.VISIBLE
+                        }
+                    }
+                    BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                        if (isAudioDevice) {
+                            // Re-check if any A2DP device is still connected
+                            val mgr = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                            val stillConnected = mgr?.adapter?.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED
+                            bluetoothIndicator?.visibility = if (stillConnected) View.VISIBLE else View.GONE
+                        }
+                    }
+                }
+            }
+        }
+
+        val filter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+        }
+        requireContext().registerReceiver(bluetoothReceiver, filter)
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        bluetoothReceiver?.let {
+            requireContext().unregisterReceiver(it)
+            bluetoothReceiver = null
+        }
+        bluetoothIndicator = null
     }
 
     private fun populateCalendar(view: View) {
