@@ -11,6 +11,11 @@
         android:title="Record" />
 
     <item
+        android:id="@+id/navigation_library"
+        android:icon="@drawable/ic_library"
+        android:title="Library" />
+
+    <item
         android:id="@+id/navigation_profile"
         android:icon="@drawable/ic_settings"
         android:title="Settings" />

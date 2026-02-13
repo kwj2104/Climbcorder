@@ -25,6 +25,10 @@ class MainActivity : AppCompatActivity() {
                     loadFragment(CameraFragment())
                     true
                 }
+                R.id.navigation_library -> {
+                    loadFragment(LibraryFragment())
+                    true
+                }
                 R.id.navigation_profile -> {
                     loadFragment(PlaceholderFragment("Settings"))
                     true

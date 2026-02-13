@@ -54,6 +54,14 @@ dependencies {
     // AndroidX Media (for MediaSessionCompat + MediaButtonReceiver)
     implementation("androidx.media:media:1.7.0")
 
+    // Coil (thumbnail loading)
+    implementation(libs.coil)
+    implementation(libs.coil.video)
+
+    // Media3 ExoPlayer (video playback)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
+
     // CameraX
     val cameraxVersion = "1.3.1"
     implementation("androidx.camera:camera-core:$cameraxVersion")
