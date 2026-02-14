@@ -1,4 +1,4 @@
-package com.example.climbcorder
+package com.example.climbcorder.ui
 
 import android.net.Uri
 import android.os.Bundle
@@ -10,6 +10,7 @@ import androidx.fragment.app.Fragment
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.example.climbcorder.R
 class PlayerFragment : Fragment() {
 
     private var player: ExoPlayer? = null

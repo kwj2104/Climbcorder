@@ -1,6 +1,5 @@
-package com.example.climbcorder
+package com.example.climbcorder.ui
 
-import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -10,8 +9,8 @@ import androidx.recyclerview.widget.RecyclerView
 import coil.decode.VideoFrameDecoder
 import coil.load
 import coil.request.videoFrameMillis
-
-data class VideoItem(val uri: Uri, val duration: Long, val dateAdded: Long)
+import com.example.climbcorder.R
+import com.example.climbcorder.data.VideoItem
 
 class VideoAdapter(
     private val items: List<VideoItem>,

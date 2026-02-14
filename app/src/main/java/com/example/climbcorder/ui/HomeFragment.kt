@@ -1,4 +1,4 @@
-package com.example.climbcorder
+package com.example.climbcorder.ui
 
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,6 +25,12 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.example.climbcorder.R
+import com.example.climbcorder.data.AppDatabase
+import com.example.climbcorder.data.VideoItem
+import com.example.climbcorder.data.VideoRepository
 import java.text.DateFormatSymbols
 import java.util.Calendar
 import java.util.concurrent.Executors
@@ -36,6 +43,18 @@ class HomeFragment : Fragment() {
 
     private var bluetoothIndicator: LinearLayout? = null
     private var bluetoothReceiver: BroadcastReceiver? = null
+
+    private var selectedDay: Int? = null
+    private var allMonthVideos: List<VideoItem> = emptyList()
+    private var feedAdapter: ActivityFeedAdapter? = null
+
+    private val heatmapColors = intArrayOf(
+        R.color.heatmap_1,
+        R.color.heatmap_2,
+        R.color.heatmap_3,
+        R.color.heatmap_4,
+        R.color.heatmap_5
+    )
 
     private val bluetoothPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -63,13 +82,26 @@ class HomeFragment : Fragment() {
 
         btnPrev.setOnClickListener {
             displayedMonth.add(Calendar.MONTH, -1)
+            selectedDay = null
             populateCalendar(view)
         }
 
         btnNext.setOnClickListener {
             displayedMonth.add(Calendar.MONTH, 1)
+            selectedDay = null
             populateCalendar(view)
         }
+
+        // Setup activity feed RecyclerView
+        val feedRecycler = view.findViewById<RecyclerView>(R.id.feed_recycler)
+        feedAdapter = ActivityFeedAdapter { video ->
+            parentFragmentManager.beginTransaction()
+                .replace(R.id.container, PlayerFragment.newInstance(video.uri))
+                .addToBackStack(null)
+                .commit()
+        }
+        feedRecycler.layoutManager = LinearLayoutManager(requireContext())
+        feedRecycler.adapter = feedAdapter
 
         populateCalendar(view)
 
@@ -100,19 +132,16 @@ class HomeFragment : Fragment() {
             requireContext().getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         val adapter = bluetoothManager?.adapter ?: return
 
-        // Check if any A2DP device is currently connected
         val connectedDevices = adapter.getProfileConnectionState(BluetoothProfile.A2DP)
         if (connectedDevices == BluetoothProfile.STATE_CONNECTED) {
             bluetoothIndicator?.visibility = View.VISIBLE
         }
 
-        // Listen for connect/disconnect events
         bluetoothReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (!hasBluetoothPermission()) return
                 val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
                 val majorClass = device?.bluetoothClass?.majorDeviceClass
-                // Accept audio/video devices (0x0400), or if class is unknown (null)
                 val isAudioDevice = majorClass == null || majorClass == 0x0400
 
                 when (intent.action) {
@@ -123,7 +152,6 @@ class HomeFragment : Fragment() {
                     }
                     BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
                         if (isAudioDevice) {
-                            // Re-check if any A2DP device is still connected
                             val mgr = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
                             val stillConnected = mgr?.adapter?.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED
                             bluetoothIndicator?.visibility = if (stillConnected) View.VISIBLE else View.GONE
@@ -147,6 +175,7 @@ class HomeFragment : Fragment() {
             bluetoothReceiver = null
         }
         bluetoothIndicator = null
+        feedAdapter = null
     }
 
     private fun populateCalendar(view: View) {
@@ -160,13 +189,11 @@ class HomeFragment : Fragment() {
         val monthName = DateFormatSymbols().months[month]
         header.text = "$monthName $year"
 
-        // Disable forward arrow if we're at the current month
         val atCurrentMonth = year == currentMonth.get(Calendar.YEAR)
                 && month == currentMonth.get(Calendar.MONTH)
         btnNext.isEnabled = !atCurrentMonth
         btnNext.alpha = if (atCurrentMonth) 0.3f else 1.0f
 
-        // Determine first day offset and days in month
         val cal = displayedMonth.clone() as Calendar
         cal.set(Calendar.DAY_OF_MONTH, 1)
         val firstDayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
@@ -174,7 +201,6 @@ class HomeFragment : Fragment() {
 
         val todayDay = if (atCurrentMonth) currentMonth.get(Calendar.DAY_OF_MONTH) else -1
 
-        // Query recording days on a background thread
         val startCal = Calendar.getInstance().apply {
             set(year, month, 1, 0, 0, 0)
             set(Calendar.MILLISECOND, 0)
@@ -185,18 +211,122 @@ class HomeFragment : Fragment() {
             add(Calendar.MONTH, 1)
         }
 
+        val startMillis = startCal.timeInMillis
+        val endMillis = endCal.timeInMillis
+
         Executors.newSingleThreadExecutor().execute {
-            val recordings = db.recordingDao().getRecordingsInRange(
-                startCal.timeInMillis, endCal.timeInMillis
-            )
+            val recordings = db.recordingDao().getRecordingsInRange(startMillis, endMillis)
             val recordingDays = recordings.map { rec ->
                 Calendar.getInstance().apply { timeInMillis = rec.timestamp }
                     .get(Calendar.DAY_OF_MONTH)
             }.toSet()
 
-            view.post {
-                buildGrid(grid, firstDayOfWeek, daysInMonth, todayDay, recordingDays)
+            // Load videos from MediaStore for this month
+            val ctx = context ?: return@execute
+            val monthVideos = VideoRepository.loadVideosInRange(ctx, startMillis, endMillis)
+
+            // Compute duration by day (dateAdded is in seconds)
+            val durationByDay = mutableMapOf<Int, Long>()
+            for (video in monthVideos) {
+                val videoCal = Calendar.getInstance().apply { timeInMillis = video.dateAdded * 1000 }
+                val day = videoCal.get(Calendar.DAY_OF_MONTH)
+                durationByDay[day] = (durationByDay[day] ?: 0L) + video.duration
             }
+
+            // Compute stats
+            val sessionCount = recordingDays.size
+            val totalDurationMs = monthVideos.sumOf { it.duration }
+
+            // Compute streak from all timestamps
+            val allTimestamps = db.recordingDao().getAllTimestampsDesc()
+            val streak = calculateStreak(allTimestamps)
+
+            view.post {
+                if (!isAdded) return@post
+                allMonthVideos = monthVideos
+                buildGrid(grid, firstDayOfWeek, daysInMonth, todayDay, recordingDays, durationByDay, view)
+                updateStats(view, sessionCount, totalDurationMs, streak)
+                updateActivityFeed(view)
+            }
+        }
+    }
+
+    private fun calculateStreak(timestampsDesc: List<Long>): Int {
+        if (timestampsDesc.isEmpty()) return 0
+
+        val days = timestampsDesc.map { ts ->
+            Calendar.getInstance().apply {
+                timeInMillis = ts
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+        }.distinct().sorted().reversed()
+
+        val today = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        val oneDayMs = 24 * 60 * 60 * 1000L
+
+        // Streak must start at today or yesterday
+        val firstDay = days[0]
+        if (firstDay != today && firstDay != today - oneDayMs) return 0
+
+        var streak = 1
+        for (i in 1 until days.size) {
+            if (days[i] == days[i - 1] - oneDayMs) {
+                streak++
+            } else {
+                break
+            }
+        }
+        return streak
+    }
+
+    private fun updateStats(view: View, sessions: Int, totalDurationMs: Long, streak: Int) {
+        view.findViewById<TextView>(R.id.stat_sessions).text = sessions.toString()
+        view.findViewById<TextView>(R.id.stat_streak).text = streak.toString()
+
+        val totalSeconds = totalDurationMs / 1000
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        view.findViewById<TextView>(R.id.stat_rec_time).text =
+            String.format("%02d:%02d", minutes, seconds)
+    }
+
+    private fun updateActivityFeed(view: View) {
+        val feedHeader = view.findViewById<TextView>(R.id.feed_header)
+        val feedRecycler = view.findViewById<RecyclerView>(R.id.feed_recycler)
+        val feedEmpty = view.findViewById<TextView>(R.id.feed_empty)
+
+        val videosToShow = if (selectedDay != null) {
+            val month = displayedMonth.get(Calendar.MONTH)
+            val year = displayedMonth.get(Calendar.YEAR)
+            val monthName = DateFormatSymbols().months[month]
+            feedHeader.text = "Recordings on $monthName $selectedDay"
+
+            allMonthVideos.filter { video ->
+                val videoCal = Calendar.getInstance().apply { timeInMillis = video.dateAdded * 1000 }
+                videoCal.get(Calendar.DAY_OF_MONTH) == selectedDay
+            }
+        } else {
+            feedHeader.text = "Recent Recordings"
+            allMonthVideos.take(3)
+        }
+
+        feedAdapter?.updateItems(videosToShow)
+
+        if (videosToShow.isEmpty()) {
+            feedRecycler.visibility = View.GONE
+            feedEmpty.visibility = View.VISIBLE
+        } else {
+            feedRecycler.visibility = View.VISIBLE
+            feedEmpty.visibility = View.GONE
         }
     }
 
@@ -205,13 +335,17 @@ class HomeFragment : Fragment() {
         firstDayOfWeek: Int,
         daysInMonth: Int,
         todayDay: Int,
-        recordingDays: Set<Int>
+        recordingDays: Set<Int>,
+        durationByDay: Map<Int, Long>,
+        rootView: View
     ) {
         grid.removeAllViews()
 
         val dayLabels = arrayOf("S", "M", "T", "W", "T", "F", "S")
 
-        // Day-of-week header row
+        // Compute max duration for heatmap scaling
+        val maxDuration = durationByDay.values.maxOrNull() ?: 0L
+
         for (label in dayLabels) {
             val tv = createCellTextView(label)
             tv.setTypeface(null, Typeface.BOLD)
@@ -219,13 +353,11 @@ class HomeFragment : Fragment() {
             grid.addView(tv)
         }
 
-        // Blank cells before day 1
         val blanks = firstDayOfWeek - Calendar.SUNDAY
         for (i in 0 until blanks) {
-            grid.addView(createCellView("", isToday = false, hasRecording = false))
+            grid.addView(createCellView("", isToday = false, hasRecording = false, heatmapLevel = 0, day = 0, rootView = rootView))
         }
 
-        // Make cells square after layout
         grid.post {
             val cellWidth = grid.width / 7
             for (i in 0 until grid.childCount) {
@@ -236,25 +368,51 @@ class HomeFragment : Fragment() {
             }
         }
 
-        // Day numbers
         for (day in 1..daysInMonth) {
+            val hasRecording = day in recordingDays
+            val duration = durationByDay[day] ?: 0L
+            val heatmapLevel = if (hasRecording && maxDuration > 0 && duration > 0) {
+                val ratio = duration.toFloat() / maxDuration
+                when {
+                    ratio <= 0.2f -> 1
+                    ratio <= 0.4f -> 2
+                    ratio <= 0.6f -> 3
+                    ratio <= 0.8f -> 4
+                    else -> 5
+                }
+            } else if (hasRecording) {
+                // Has Room recording but no MediaStore video — show level 1
+                1
+            } else {
+                0
+            }
+
             val cell = createCellView(
                 day.toString(),
                 isToday = day == todayDay,
-                hasRecording = day in recordingDays
+                hasRecording = hasRecording,
+                heatmapLevel = heatmapLevel,
+                day = day,
+                rootView = rootView
             )
             grid.addView(cell)
         }
 
-        // Fill remaining cells so the grid always has 7 rows (1 header + 6 data)
         val totalCells = 7 + blanks + daysInMonth
         val targetCells = 7 * 7
         for (i in totalCells until targetCells) {
-            grid.addView(createCellView("", isToday = false, hasRecording = false))
+            grid.addView(createCellView("", isToday = false, hasRecording = false, heatmapLevel = 0, day = 0, rootView = rootView))
         }
     }
 
-    private fun createCellView(text: String, isToday: Boolean, hasRecording: Boolean): View {
+    private fun createCellView(
+        text: String,
+        isToday: Boolean,
+        hasRecording: Boolean,
+        heatmapLevel: Int,
+        day: Int,
+        rootView: View
+    ): View {
         val ctx = requireContext()
         val layout = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -296,10 +454,30 @@ class HomeFragment : Fragment() {
                     TypedValue.COMPLEX_UNIT_DIP, 2f, resources.displayMetrics
                 ).toInt()
             }
-            setBackgroundResource(R.drawable.recording_dot)
+            if (hasRecording && heatmapLevel > 0) {
+                val colorRes = heatmapColors[heatmapLevel - 1]
+                val drawable = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(ContextCompat.getColor(ctx, colorRes))
+                    setSize(dotSize, dotSize)
+                }
+                background = drawable
+            } else {
+                setBackgroundResource(R.drawable.recording_dot)
+            }
             visibility = if (hasRecording) View.VISIBLE else View.GONE
         }
         layout.addView(dot)
+
+        // Make days with recordings clickable
+        if (hasRecording && day > 0) {
+            layout.setOnClickListener {
+                selectedDay = if (selectedDay == day) null else day
+                updateActivityFeed(rootView)
+            }
+            layout.isClickable = true
+            layout.isFocusable = true
+        }
 
         return layout
     }

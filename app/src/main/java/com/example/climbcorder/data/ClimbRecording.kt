@@ -1,4 +1,4 @@
-package com.example.climbcorder
+package com.example.climbcorder.data
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey

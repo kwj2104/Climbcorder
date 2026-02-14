@@ -1,4 +1,4 @@
-package com.example.climbcorder
+package com.example.climbcorder.ui
 
 import android.Manifest
 import android.bluetooth.BluetoothDevice
@@ -38,6 +38,9 @@ import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import com.example.climbcorder.R
+import com.example.climbcorder.data.AppDatabase
+import com.example.climbcorder.data.ClimbRecording
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.ExecutorService
