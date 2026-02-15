@@ -1,5 +1,9 @@
 package com.example.climbcorder.ui
 
+import android.graphics.Bitmap
+import android.os.Build
+import android.util.LruCache
+import android.util.Size
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -11,6 +15,7 @@ import coil.load
 import coil.request.videoFrameMillis
 import com.example.climbcorder.R
 import com.example.climbcorder.data.VideoItem
+import java.util.concurrent.Executors
 
 class VideoAdapter(
     private val items: List<VideoItem>,
@@ -27,6 +32,8 @@ class VideoAdapter(
         }
 
     private val selectedIds = mutableSetOf<Long>()
+    private val thumbExecutor = Executors.newFixedThreadPool(4)
+    private val thumbCache = LruCache<Long, Bitmap>(50)
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val thumbnail: ImageView = view.findViewById(R.id.thumbnail)
@@ -48,10 +55,32 @@ class VideoAdapter(
         val width = holder.itemView.resources.displayMetrics.widthPixels / 4
         holder.itemView.layoutParams.height = width
 
-        holder.thumbnail.load(item.uri) {
-            crossfade(true)
-            decoderFactory { result, options, _ -> VideoFrameDecoder(result.source, options) }
-            videoFrameMillis(item.duration / 2)
+        // Load thumbnail using OS-cached MediaStore thumbnails (API 29+)
+        // or fall back to Coil VideoFrameDecoder for older devices
+        holder.thumbnail.tag = item.mediaStoreId
+        val cached = thumbCache.get(item.mediaStoreId)
+        if (cached != null) {
+            holder.thumbnail.setImageBitmap(cached)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            holder.thumbnail.setImageDrawable(null)
+            val id = item.mediaStoreId
+            thumbExecutor.execute {
+                try {
+                    val bitmap = holder.thumbnail.context.contentResolver
+                        .loadThumbnail(item.uri, Size(width, width), null)
+                    thumbCache.put(id, bitmap)
+                    holder.thumbnail.post {
+                        if (holder.thumbnail.tag == id) {
+                            holder.thumbnail.setImageBitmap(bitmap)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        } else {
+            holder.thumbnail.load(item.uri) {
+                decoderFactory { result, options, _ -> VideoFrameDecoder(result.source, options) }
+                videoFrameMillis(item.duration / 2)
+            }
         }
 
         val totalSeconds = item.duration / 1000

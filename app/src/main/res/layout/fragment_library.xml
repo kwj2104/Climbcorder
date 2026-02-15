@@ -4,7 +4,14 @@
     android:layout_height="match_parent"
     android:background="@color/light_grey">
 
-    <!-- Header -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:paddingTop="56dp" />
+
+    <!-- Header (after RecyclerView so it sits on top for touch events) -->
     <LinearLayout
         android:id="@+id/header"
         android:layout_width="match_parent"
@@ -50,13 +57,6 @@
             android:textColor="@color/dark_grey"
             android:background="?attr/selectableItemBackgroundBorderless" />
     </LinearLayout>
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recycler_view"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:clipToPadding="false"
-        android:paddingTop="56dp" />
 
     <TextView
         android:id="@+id/empty_state"

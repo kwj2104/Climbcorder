@@ -528,12 +528,13 @@ class CameraFragment : Fragment() {
 
             // Build presets once
             if (zoomPresets.isEmpty()) {
+                Log.d(TAG, "Zoom range: min=$min max=$max")
                 val presets = mutableListOf<Float>()
-                if (min <= 0.6f) presets.add(0.5f)
+                if (min <= 0.6f) presets.add(min)
                 presets.add(1.0f)
                 if (max >= 2.0f) presets.add(2.0f)
-                if (max >= 5.0f) presets.add(5.0f)
                 zoomPresets = presets
+                Log.d(TAG, "Zoom presets: $zoomPresets")
                 buildZoomButtons()
             }
 
@@ -547,19 +548,19 @@ class CameraFragment : Fragment() {
         zoomButtons.clear()
 
         val dp = resources.displayMetrics.density
-        val sizePx = (40 * dp).toInt()
-        val marginPx = (4 * dp).toInt()
+        val sizePx = (48 * dp).toInt()
+        val marginPx = (6 * dp).toInt()
 
         for (preset in zoomPresets) {
-            val label = if (preset == preset.toLong().toFloat()) {
-                "${preset.toInt()}x"
-            } else {
-                "${"%.1f".format(preset)}x"
+            val label = when {
+                preset < 0.7f -> "0.5x"
+                preset == preset.toLong().toFloat() -> "${preset.toInt()}x"
+                else -> "${"%.1f".format(preset)}x"
             }
 
             val btn = TextView(requireContext()).apply {
                 text = label
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                 setTextColor(0xFFFFFFFF.toInt())
                 gravity = Gravity.CENTER
                 background = createZoomButtonBackground(false)
@@ -620,8 +621,7 @@ class CameraFragment : Fragment() {
             })
 
         viewFinder.setOnTouchListener { _, event ->
-            scaleGestureDetector?.onTouchEvent(event)
-            true
+            scaleGestureDetector?.onTouchEvent(event) ?: false
         }
     }
 
