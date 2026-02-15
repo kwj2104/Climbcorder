@@ -23,4 +23,21 @@
         android:paddingVertical="2dp"
         android:textColor="#FFFFFF"
         android:textSize="12sp" />
+
+    <!-- Selection overlay -->
+    <View
+        android:id="@+id/select_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#4D2196F3"
+        android:visibility="gone" />
+
+    <ImageView
+        android:id="@+id/check_icon"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:layout_gravity="center"
+        android:src="@drawable/ic_check_circle"
+        android:visibility="gone"
+        android:contentDescription="Selected" />
 </FrameLayout>

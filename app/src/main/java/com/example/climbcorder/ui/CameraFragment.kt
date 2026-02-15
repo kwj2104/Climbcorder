@@ -21,7 +21,11 @@ import android.provider.MediaStore
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AlphaAnimation
@@ -30,6 +34,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -51,6 +56,7 @@ class CameraFragment : Fragment() {
     private var videoCapture: VideoCapture<Recorder>? = null
     private var recording: Recording? = null
     private lateinit var cameraExecutor: ExecutorService
+    private var camera: Camera? = null
 
     private lateinit var viewFinder: PreviewView
     private lateinit var recordButton: FrameLayout
@@ -58,7 +64,12 @@ class CameraFragment : Fragment() {
     private lateinit var timerText: TextView
     private lateinit var bluetoothIndicator: LinearLayout
     private lateinit var bluetoothText: TextView
+    private lateinit var zoomButtonRow: LinearLayout
     private var pulseAnimation: AlphaAnimation? = null
+
+    private var zoomPresets = listOf<Float>()
+    private var zoomButtons = mutableListOf<TextView>()
+    private var scaleGestureDetector: ScaleGestureDetector? = null
 
     private var mediaSession: MediaSessionCompat? = null
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -118,6 +129,9 @@ class CameraFragment : Fragment() {
         timerText = view.findViewById(R.id.timerText)
         bluetoothIndicator = view.findViewById(R.id.bluetoothIndicator)
         bluetoothText = view.findViewById(R.id.bluetoothText)
+        zoomButtonRow = view.findViewById(R.id.zoomButtonRow)
+
+        setupPinchToZoom()
 
         // Check permissions
         if (allPermissionsGranted()) {
@@ -347,12 +361,14 @@ class CameraFragment : Fragment() {
                 cameraProvider.unbindAll()
 
                 // Bind camera to lifecycle
-                cameraProvider.bindToLifecycle(
+                camera = cameraProvider.bindToLifecycle(
                     viewLifecycleOwner,
                     cameraSelector,
                     preview,
                     videoCapture
                 )
+
+                setupZoomControls()
 
             } catch (e: Exception) {
                 Log.e(TAG, "Camera binding failed", e)
@@ -499,6 +515,113 @@ class CameraFragment : Fragment() {
                     Toast.LENGTH_SHORT
                 ).show()
             }
+        }
+    }
+
+    private fun setupZoomControls() {
+        val cam = camera ?: return
+        cam.cameraInfo.zoomState.observe(viewLifecycleOwner) { zoomState ->
+            if (zoomState == null) return@observe
+
+            val min = zoomState.minZoomRatio
+            val max = zoomState.maxZoomRatio
+
+            // Build presets once
+            if (zoomPresets.isEmpty()) {
+                val presets = mutableListOf<Float>()
+                if (min <= 0.6f) presets.add(0.5f)
+                presets.add(1.0f)
+                if (max >= 2.0f) presets.add(2.0f)
+                if (max >= 5.0f) presets.add(5.0f)
+                zoomPresets = presets
+                buildZoomButtons()
+            }
+
+            // Highlight nearest preset
+            highlightNearestPreset(zoomState.zoomRatio)
+        }
+    }
+
+    private fun buildZoomButtons() {
+        zoomButtonRow.removeAllViews()
+        zoomButtons.clear()
+
+        val dp = resources.displayMetrics.density
+        val sizePx = (40 * dp).toInt()
+        val marginPx = (4 * dp).toInt()
+
+        for (preset in zoomPresets) {
+            val label = if (preset == preset.toLong().toFloat()) {
+                "${preset.toInt()}x"
+            } else {
+                "${"%.1f".format(preset)}x"
+            }
+
+            val btn = TextView(requireContext()).apply {
+                text = label
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setTextColor(0xFFFFFFFF.toInt())
+                gravity = Gravity.CENTER
+                background = createZoomButtonBackground(false)
+                layoutParams = LinearLayout.LayoutParams(sizePx, sizePx).apply {
+                    setMargins(marginPx, 0, marginPx, 0)
+                }
+                setOnClickListener {
+                    camera?.cameraControl?.setZoomRatio(preset)
+                }
+            }
+            zoomButtons.add(btn)
+            zoomButtonRow.addView(btn)
+        }
+
+        zoomButtonRow.visibility = if (zoomPresets.size > 1) View.VISIBLE else View.GONE
+    }
+
+    private fun highlightNearestPreset(currentRatio: Float) {
+        if (zoomPresets.isEmpty()) return
+        var nearestIdx = 0
+        var minDist = Float.MAX_VALUE
+        for ((i, preset) in zoomPresets.withIndex()) {
+            val dist = kotlin.math.abs(currentRatio - preset)
+            if (dist < minDist) {
+                minDist = dist
+                nearestIdx = i
+            }
+        }
+        for ((i, btn) in zoomButtons.withIndex()) {
+            val selected = i == nearestIdx
+            btn.background = createZoomButtonBackground(selected)
+            btn.setTextColor(if (selected) 0xFF000000.toInt() else 0xFFFFFFFF.toInt())
+        }
+    }
+
+    private fun createZoomButtonBackground(selected: Boolean): android.graphics.drawable.GradientDrawable {
+        return android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            if (selected) {
+                setColor(0xFFFFFFFF.toInt())
+            } else {
+                setColor(0x66000000)
+            }
+        }
+    }
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    private fun setupPinchToZoom() {
+        scaleGestureDetector = ScaleGestureDetector(requireContext(),
+            object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(detector: ScaleGestureDetector): Boolean {
+                    val cam = camera ?: return false
+                    val currentZoom = cam.cameraInfo.zoomState.value?.zoomRatio ?: 1f
+                    val newZoom = currentZoom * detector.scaleFactor
+                    cam.cameraControl.setZoomRatio(newZoom)
+                    return true
+                }
+            })
+
+        viewFinder.setOnTouchListener { _, event ->
+            scaleGestureDetector?.onTouchEvent(event)
+            true
         }
     }
 

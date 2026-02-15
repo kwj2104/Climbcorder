@@ -2,7 +2,54 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F2F2F2">
+    android:background="@color/light_grey">
+
+    <!-- Header -->
+    <LinearLayout
+        android:id="@+id/header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical|bottom"
+        android:paddingStart="32dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="64dp"
+        android:paddingBottom="8dp"
+        android:background="@color/light_grey">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Library"
+            android:textSize="50sp"
+            android:textStyle="normal"
+            android:textColor="@color/dark_grey"
+            android:includeFontPadding="false" />
+
+        <TextView
+            android:id="@+id/btn_select"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:gravity="center"
+            android:paddingHorizontal="16dp"
+            android:text="Select"
+            android:textSize="14sp"
+            android:textColor="@color/dark_grey"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+
+        <TextView
+            android:id="@+id/btn_import"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:gravity="center"
+            android:paddingHorizontal="16dp"
+            android:layout_marginStart="4dp"
+            android:text="Import"
+            android:textSize="14sp"
+            android:textColor="@color/dark_grey"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+    </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler_view"
@@ -20,4 +67,28 @@
         android:textSize="18sp"
         android:textColor="#888888"
         android:visibility="gone" />
+
+    <!-- Delete bar -->
+    <LinearLayout
+        android:id="@+id/delete_bar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_gravity="bottom"
+        android:background="#FFFFFF"
+        android:elevation="8dp"
+        android:gravity="center"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/btn_delete"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:paddingHorizontal="32dp"
+            android:text="Delete"
+            android:textSize="15sp"
+            android:textColor="#FF3B30"
+            android:textStyle="bold"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+    </LinearLayout>
 </FrameLayout>

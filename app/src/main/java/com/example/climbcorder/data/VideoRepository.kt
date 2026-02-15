@@ -1,12 +1,19 @@
 package com.example.climbcorder.data
 
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
+import android.os.Environment
 import android.provider.MediaStore
 
 object VideoRepository {
 
-    fun loadVideos(context: Context, relativePathPattern: String = "%HelloWorld%"): List<VideoItem> {
+    fun loadVideos(
+        context: Context,
+        relativePathPattern: String = "%HelloWorld%",
+        excludeIds: Set<Long> = emptySet()
+    ): List<VideoItem> {
         val videos = mutableListOf<VideoItem>()
         val projection = arrayOf(
             MediaStore.Video.Media._ID,
@@ -30,12 +37,13 @@ object VideoRepository {
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
+                if (id in excludeIds) continue
                 val duration = cursor.getLong(durationCol)
                 val dateAdded = cursor.getLong(dateCol)
                 val uri = ContentUris.withAppendedId(
                     MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id
                 )
-                videos.add(VideoItem(uri, duration, dateAdded))
+                videos.add(VideoItem(uri, duration, dateAdded, id))
             }
         }
         return videos
@@ -74,9 +82,38 @@ object VideoRepository {
                 val uri = ContentUris.withAppendedId(
                     MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id
                 )
-                videos.add(VideoItem(uri, duration, dateAdded))
+                videos.add(VideoItem(uri, duration, dateAdded, id))
             }
         }
         return videos
+    }
+
+    fun importVideo(context: Context, sourceUri: Uri): Uri? {
+        return try {
+            val resolver = context.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, "imported_${System.currentTimeMillis()}.mp4")
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/HelloWorld")
+            }
+            val destUri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return null
+            resolver.openInputStream(sourceUri)?.use { input ->
+                resolver.openOutputStream(destUri)?.use { output ->
+                    input.copyTo(output)
+                }
+            }
+            destUri
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun deleteVideo(context: Context, uri: Uri): Boolean {
+        return try {
+            context.contentResolver.delete(uri, null, null) > 0
+        } catch (_: Exception) {
+            false
+        }
     }
 }

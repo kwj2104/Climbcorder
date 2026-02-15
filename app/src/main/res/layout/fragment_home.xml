@@ -10,32 +10,16 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <LinearLayout
+        <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="32dp"
             android:layout_marginTop="64dp"
-            android:orientation="vertical">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Hello"
-                android:textColor="@color/dark_grey"
-                android:textSize="50sp"
-                android:textStyle="normal"
-                android:includeFontPadding="false" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Kevin"
-                android:textColor="@color/dark_grey"
-                android:textSize="70sp"
-                android:textStyle="bold"
-                android:includeFontPadding="false" />
-
-        </LinearLayout>
+            android:text="Home"
+            android:textColor="@color/dark_grey"
+            android:textSize="50sp"
+            android:textStyle="normal"
+            android:includeFontPadding="false" />
 
         <!-- Calendar card -->
         <LinearLayout

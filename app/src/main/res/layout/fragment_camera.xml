@@ -52,6 +52,19 @@
 
     </LinearLayout>
 
+    <!-- Zoom preset buttons -->
+    <LinearLayout
+        android:id="@+id/zoomButtonRow"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginBottom="16dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/timerText"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
     <!-- Timer pill (above record button) -->
     <TextView
         android:id="@+id/timerText"
